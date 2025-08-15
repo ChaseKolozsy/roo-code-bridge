@@ -3,6 +3,8 @@
 ## Overview
 Phase 2 focuses on creating a transparent communication bridge between web interfaces and Roo-Code. The bridge will pass ALL messages, handle approval flows, and allow configuration of Roo-Code's provider settings. The LLM within Roo-Code remains in control of all tools and operations.
 
+**📘 Implementation Details**: See [PHASE2_IMPLEMENTATION_DETAILS.md](PHASE2_IMPLEMENTATION_DETAILS.md) for complete technical specifications, API methods, message formats, and code examples that enable implementation without examining Roo-Code's source code.
+
 ## Core Concept
 ```
 Web UI ←→ Bridge Server ←→ VS Code Extension ←→ Roo-Code
