@@ -149,10 +149,12 @@ curl -H "Authorization: Bearer your-token" \
 
 Phase 2 will focus on Roo-Code Integration:
 - [ ] Complete task lifecycle management
-- [ ] File system operations integration
+- [ ] File system operations integration  
 - [ ] Command execution with real Roo-Code
 - [ ] Message streaming from Roo-Code
 - [ ] Configuration management persistence
+
+See [PHASE2_PLAN.md](PHASE2_PLAN.md) for detailed implementation plan.
 
 ## Known Issues
 
