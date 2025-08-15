@@ -1,0 +1,57 @@
+{
+  "name": "roo-code-bridge",
+  "displayName": "Roo-Code Bridge",
+  "description": "Programmatic interface for Roo-Code and other AI coding assistants",
+  "version": "0.1.0",
+  "engines": {
+    "vscode": "^1.84.0"
+  },
+  "categories": ["Other"],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "roo-code-bridge.start",
+        "title": "Start Roo-Code Bridge Server"
+      },
+      {
+        "command": "roo-code-bridge.stop",
+        "title": "Stop Roo-Code Bridge Server"
+      },
+      {
+        "command": "roo-code-bridge.status",
+        "title": "Roo-Code Bridge Server Status"
+      }
+    ],
+    "configuration": {
+      "title": "Roo-Code Bridge",
+      "properties": {
+        "roo-code-bridge.server.port": {
+          "type": "number",
+          "default": 9999,
+          "description": "TCP port for IPC server"
+        },
+        "roo-code-bridge.server.host": {
+          "type": "string",
+          "default": "127.0.0.1",
+          "description": "Host address for IPC server"
+        },
+        "roo-code-bridge.debug": {
+          "type": "boolean",
+          "default": false,
+          "description": "Enable debug logging"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.84.0",
+    "@types/node": "20.x",
+    "typescript": "^5.2.0"
+  }
+}
