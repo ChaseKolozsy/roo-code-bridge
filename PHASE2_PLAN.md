@@ -723,12 +723,6 @@ async def test_full_communication_flow():
 - [ ] Multiple concurrent sessions supported
 - [ ] < 50ms message routing latency
 
-## Timeline
-
-- **Week 1**: Message types and routing infrastructure
-- **Week 2**: Provider configuration and approval flows
-- **Week 3**: VS Code extension integration
-- **Week 4**: Testing and optimization
 
 ## Key Differences from Original Plan
 
