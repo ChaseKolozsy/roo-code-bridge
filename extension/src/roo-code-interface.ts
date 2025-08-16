@@ -392,17 +392,11 @@ export class RooCodeInterface {
         }
 
         try {
-            // Use Roo-Code's startNewTask method
+            // Use Roo-Code's startNewTask method as natural user input
+            // Pass undefined for configuration so Roo-Code uses whatever the user has already configured
             const taskId = await this.rooCodeAPI.startNewTask({
-                configuration: config || {
-                    apiProvider: 'openai-compatible',
-                    apiModelId: 'qwen-3-coder',
-                    apiUrl: 'http://localhost:3000/v1',
-                    contextLength: 131000,
-                    maxTokens: 4096,
-                    temperature: 0.7
-                },
                 text: prompt
+                // No configuration specified - let Roo-Code use current user settings
             });
 
             this.log(`Roo-Code task started with ID: ${taskId}`);
