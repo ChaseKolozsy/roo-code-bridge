@@ -56,6 +56,7 @@ export interface TaskResult {
     output?: string;
     error?: string;
     exitCode?: number;
+    taskId?: string;
 }
 
 export interface RooCodeCapabilities {

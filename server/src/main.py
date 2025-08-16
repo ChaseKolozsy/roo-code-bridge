@@ -17,6 +17,9 @@ from api.messages import router as messages_router
 from adapters.base import LLMAdapter
 from adapters.roo_code import RooCodeAdapter
 from utils.ipc_client import IPCClient
+from messages.router import MessageRouter
+from messages.types import WebviewMessage
+from config.provider_manager import ProviderManager
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -24,6 +27,9 @@ logger = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await init_db()
+    # Initialize provider manager and message router
+    app.state.provider_manager = ProviderManager()
+    app.state.message_router = MessageRouter(app.state.provider_manager)
     yield
     await SessionManager.cleanup_all()
 
@@ -47,6 +53,7 @@ class ConnectionManager:
         self.active_connections: Dict[str, WebSocket] = {}
         self.sessions: Dict[str, Session] = {}
         self.adapters: Dict[str, LLMAdapter] = {}
+        self.message_router: Optional[MessageRouter] = None
         
     async def connect(self, websocket: WebSocket, client_id: str):
         await websocket.accept()
@@ -59,6 +66,9 @@ class ConnectionManager:
             adapter = RooCodeAdapter(client_id)
             if await adapter.connect():
                 self.adapters[client_id] = adapter
+                # Register IPC client with message router
+                if self.message_router:
+                    self.message_router.register_ipc_client(client_id, adapter.ipc_client)
                 logger.info(f"Client {client_id} connected with adapter")
             else:
                 logger.warning(f"Client {client_id} connected but adapter unavailable")
@@ -74,6 +84,9 @@ class ConnectionManager:
             SessionManager.close_session(self.sessions[client_id].id)
             del self.sessions[client_id]
         if client_id in self.adapters:
+            # Unregister from message router
+            if self.message_router:
+                self.message_router.unregister_ipc_client(client_id)
             self.adapters[client_id].disconnect()
             del self.adapters[client_id]
         logger.info(f"Client {client_id} disconnected")
@@ -81,6 +94,11 @@ class ConnectionManager:
     async def send_message(self, client_id: str, message: dict):
         if client_id in self.active_connections:
             await self.active_connections[client_id].send_json(message)
+            
+    async def send_personal_message(self, message: str, client_id: str):
+        """Send message string to a specific client."""
+        if client_id in self.active_connections:
+            await self.active_connections[client_id].send_text(message)
             
     async def broadcast(self, message: dict, exclude: Optional[str] = None):
         for client_id, connection in self.active_connections.items():
@@ -99,6 +117,37 @@ class ConnectionManager:
             })
             return
         
+        # Use message router for Phase 2 message types
+        if self.message_router and message_type in [
+            "newTask", "askResponse", "saveApiConfiguration", 
+            "cancelTask", "resumeTask", "selectImages", "draggedImages"
+        ]:
+            try:
+                webview_msg = WebviewMessage(
+                    type=message_type,
+                    data=data,
+                    images=message.get("images", [])
+                )
+                result = await self.message_router.route_from_web(client_id, webview_msg)
+                if result and "error" not in result:
+                    await self.send_message(client_id, {
+                        "type": "response",
+                        "data": result
+                    })
+                elif result and "error" in result:
+                    await self.send_message(client_id, {
+                        "type": "error",
+                        "data": {"message": result["error"]}
+                    })
+            except Exception as e:
+                logger.error(f"Error in message router: {e}")
+                await self.send_message(client_id, {
+                    "type": "error",
+                    "data": {"message": str(e)}
+                })
+            return
+        
+        # Legacy handling for Phase 1 compatibility
         if client_id not in self.adapters:
             await self.send_message(client_id, {
                 "type": "error",
@@ -147,6 +196,11 @@ manager = ConnectionManager()
 
 @app.websocket("/ws/{client_id}")
 async def websocket_endpoint(websocket: WebSocket, client_id: str):
+    # Connect message router and manager
+    if hasattr(app.state, 'message_router'):
+        manager.message_router = app.state.message_router
+        app.state.message_router.set_websocket_manager(manager)
+    
     await manager.connect(websocket, client_id)
     try:
         while True:
@@ -173,4 +227,4 @@ async def health_check():
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
+    uvicorn.run("main:app", host="0.0.0.0", port=47291, reload=True)

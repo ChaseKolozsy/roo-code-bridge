@@ -17,6 +17,11 @@ export class IPCServer extends EventEmitter {
         this.host = host;
         this.port = port;
         this.rooInterface = rooInterface;
+        
+        // Set up Roo-Code event forwarding
+        this.rooInterface.onClientNotification((event: string, data: any) => {
+            this.broadcastToClients(event, data);
+        });
     }
 
     async start(): Promise<void> {
@@ -167,6 +172,22 @@ export class IPCServer extends EventEmitter {
                     await this.handleRunTask(session, message);
                     break;
 
+                case 'configureProvider':
+                    if (!session.authenticated) {
+                        this.sendError(session.socket, 'AUTH_REQUIRED', 'Authentication required');
+                        return;
+                    }
+                    await this.handleConfigureProvider(session, message);
+                    break;
+
+                case 'approvalResponse':
+                    if (!session.authenticated) {
+                        this.sendError(session.socket, 'AUTH_REQUIRED', 'Authentication required');
+                        return;
+                    }
+                    await this.handleApprovalResponse(session, message);
+                    break;
+
                 default:
                     this.sendError(session.socket, 'UNKNOWN_MESSAGE', `Unknown message type: ${message.type}`);
             }
@@ -274,17 +295,62 @@ export class IPCServer extends EventEmitter {
     }
 
     private async handleRunTask(session: ClientSession, message: IPCMessage) {
-        const { taskName } = message.data || {};
-        if (!taskName) {
-            this.sendError(session.socket, 'INVALID_PARAMS', 'Task name is required');
+        const { prompt, config } = message.data || {};
+        if (!prompt) {
+            this.sendError(session.socket, 'INVALID_PARAMS', 'Prompt is required');
             return;
         }
 
-        const result = await this.rooInterface.runTask(taskName);
+        const result = await this.rooInterface.runTask(prompt, config);
         this.sendResponse(session.socket, {
             type: 'taskResult',
             data: result
         });
+    }
+
+    private async handleConfigureProvider(session: ClientSession, message: IPCMessage) {
+        const config = message.data;
+        if (!config) {
+            this.sendError(session.socket, 'INVALID_PARAMS', 'Configuration is required');
+            return;
+        }
+
+        const success = await this.rooInterface.configureProvider(config);
+        this.sendResponse(session.socket, {
+            type: 'configurationResult',
+            data: { success }
+        });
+    }
+
+    private async handleApprovalResponse(session: ClientSession, message: IPCMessage) {
+        const { approved, response } = message.data || {};
+        if (typeof approved !== 'boolean') {
+            this.sendError(session.socket, 'INVALID_PARAMS', 'Approval status is required');
+            return;
+        }
+
+        const success = await this.rooInterface.sendApprovalResponse(approved, response);
+        this.sendResponse(session.socket, {
+            type: 'approvalResult',
+            data: { success }
+        });
+    }
+
+    private broadcastToClients(event: string, data: any) {
+        const message = JSON.stringify({
+            type: 'event',
+            data: { event, data }
+        }) + '\n';
+
+        for (const [clientId, session] of this.clients.entries()) {
+            if (session.authenticated) {
+                try {
+                    session.socket.write(message);
+                } catch (error) {
+                    console.error(`Failed to send event to client ${clientId}:`, error);
+                }
+            }
+        }
     }
 
     private sendResponse(socket: net.Socket, response: IPCResponse) {

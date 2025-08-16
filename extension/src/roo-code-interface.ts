@@ -14,10 +14,94 @@ const statAsync = promisify(fs.stat);
 export class RooCodeInterface {
     private context: vscode.ExtensionContext;
     private outputChannel: vscode.OutputChannel;
+    private rooCodeAPI: any = null;
+    private rooCodeExtension: vscode.Extension<any> | undefined;
 
     constructor(context: vscode.ExtensionContext) {
         this.context = context;
         this.outputChannel = vscode.window.createOutputChannel('Roo-Code Bridge');
+        this.initializeRooCodeConnection();
+    }
+
+    private async initializeRooCodeConnection() {
+        try {
+            // Roo-Code's extension ID (from the implementation details)
+            const ROO_CODE_EXTENSION_ID = 'rooveterinaryinc.roo-cline';
+            
+            // Get the Roo-Code extension
+            this.rooCodeExtension = vscode.extensions.getExtension(ROO_CODE_EXTENSION_ID);
+            
+            if (!this.rooCodeExtension) {
+                this.log('Roo-Code extension not found');
+                return;
+            }
+            
+            // Activate if not already active
+            if (!this.rooCodeExtension.isActive) {
+                await this.rooCodeExtension.activate();
+                this.log('Roo-Code extension activated');
+            }
+            
+            // Get the API
+            this.rooCodeAPI = this.rooCodeExtension.exports;
+            
+            if (this.rooCodeAPI) {
+                this.log('Connected to Roo-Code API successfully');
+                this.setupRooCodeEventListeners();
+            } else {
+                this.log('Roo-Code API not available');
+            }
+        } catch (error: any) {
+            this.log(`Failed to connect to Roo-Code: ${error.message}`);
+        }
+    }
+
+    private setupRooCodeEventListeners() {
+        if (!this.rooCodeAPI) return;
+
+        try {
+            // Listen for task events
+            this.rooCodeAPI.on('taskStarted', (taskId: string) => {
+                this.log(`Task started: ${taskId}`);
+                this.notifyClients('taskStarted', { taskId });
+            });
+
+            this.rooCodeAPI.on('taskCompleted', (taskId: string, tokenUsage: any, toolUsage: any, meta: any) => {
+                this.log(`Task completed: ${taskId}`);
+                this.notifyClients('taskCompleted', { taskId, tokenUsage, toolUsage, meta });
+            });
+
+            this.rooCodeAPI.on('taskAborted', (taskId: string) => {
+                this.log(`Task aborted: ${taskId}`);
+                this.notifyClients('taskAborted', { taskId });
+            });
+
+            // Listen for messages (the key part for communication)
+            this.rooCodeAPI.on('message', (messageEvent: any) => {
+                this.log(`Message from Roo-Code: ${JSON.stringify(messageEvent)}`);
+                this.notifyClients('rooCodeMessage', messageEvent);
+            });
+
+            this.log('Roo-Code event listeners set up');
+        } catch (error: any) {
+            this.log(`Error setting up event listeners: ${error.message}`);
+        }
+    }
+
+    private clientNotificationCallbacks: ((event: string, data: any) => void)[] = [];
+
+    public onClientNotification(callback: (event: string, data: any) => void) {
+        this.clientNotificationCallbacks.push(callback);
+    }
+
+    private notifyClients(event: string, data: any) {
+        this.clientNotificationCallbacks.forEach(callback => {
+            try {
+                callback(event, data);
+            } catch (error: any) {
+                this.log(`Error notifying client: ${error.message}`);
+            }
+        });
     }
 
     getCapabilities(): RooCodeCapabilities {
@@ -31,7 +115,9 @@ export class RooCodeInterface {
                 'search',
                 'getActiveFile',
                 'getDiagnostics',
-                'runTask'
+                'runTask',
+                'configureProvider',
+                'approvalResponse'
             ],
             tools: [
                 'terminal',
@@ -295,47 +381,97 @@ export class RooCodeInterface {
         };
     }
 
-    async runTask(taskName: string): Promise<TaskResult> {
-        this.log(`Running task: ${taskName}`);
+    async runTask(prompt: string, config?: any): Promise<TaskResult> {
+        this.log(`Running Roo-Code task: ${prompt.substring(0, 100)}...`);
         
+        if (!this.rooCodeAPI) {
+            return {
+                success: false,
+                error: 'Roo-Code API not available'
+            };
+        }
+
         try {
-            const tasks = await vscode.tasks.fetchTasks();
-            const task = tasks.find(t => t.name === taskName);
-            
-            if (!task) {
-                throw new Error(`Task '${taskName}' not found`);
-            }
-            
-            const execution = await vscode.tasks.executeTask(task);
-            
-            // Wait for task to complete (simplified - in production, use proper event handling)
-            return new Promise((resolve) => {
-                const disposable = vscode.tasks.onDidEndTask((e) => {
-                    if (e.execution === execution) {
-                        disposable.dispose();
-                        resolve({
-                            success: true,
-                            output: 'Task completed'
-                        });
-                    }
-                });
-                
-                // Timeout after 30 seconds
-                setTimeout(() => {
-                    disposable.dispose();
-                    resolve({
-                        success: false,
-                        error: 'Task timeout'
-                    });
-                }, 30000);
+            // Use Roo-Code's startNewTask method
+            const taskId = await this.rooCodeAPI.startNewTask({
+                configuration: config || {
+                    apiProvider: 'openai-compatible',
+                    apiModelId: 'qwen-3-coder',
+                    apiUrl: 'http://localhost:3000/v1',
+                    contextLength: 131000,
+                    maxTokens: 4096,
+                    temperature: 0.7
+                },
+                text: prompt
             });
+
+            this.log(`Roo-Code task started with ID: ${taskId}`);
+            
+            return {
+                success: true,
+                output: `Task started with ID: ${taskId}`,
+                taskId: taskId
+            };
         } catch (error: any) {
-            this.log(`Task failed: ${error.message}`);
+            this.log(`Roo-Code task failed: ${error.message}`);
             return {
                 success: false,
                 error: error.message
             };
         }
+    }
+
+    // Add method to configure Roo-Code provider
+    async configureProvider(config: any): Promise<boolean> {
+        this.log(`Configuring Roo-Code provider: ${JSON.stringify(config)}`);
+        
+        if (!this.rooCodeAPI) {
+            this.log('Roo-Code API not available for configuration');
+            return false;
+        }
+
+        try {
+            await this.rooCodeAPI.setConfiguration(config);
+            this.log('Roo-Code provider configured successfully');
+            return true;
+        } catch (error: any) {
+            this.log(`Failed to configure Roo-Code provider: ${error.message}`);
+            return false;
+        }
+    }
+
+    // Add method to send approval responses
+    async sendApprovalResponse(approved: boolean, response?: string): Promise<boolean> {
+        this.log(`Sending approval response: ${approved ? 'approved' : 'denied'}`);
+        
+        if (!this.rooCodeAPI) {
+            this.log('Roo-Code API not available for approval response');
+            return false;
+        }
+
+        try {
+            if (approved) {
+                await this.rooCodeAPI.pressPrimaryButton();
+            } else {
+                await this.rooCodeAPI.pressSecondaryButton();
+            }
+            
+            // If there's a text response, send it
+            if (response) {
+                await this.rooCodeAPI.sendMessage(response);
+            }
+            
+            this.log('Approval response sent successfully');
+            return true;
+        } catch (error: any) {
+            this.log(`Failed to send approval response: ${error.message}`);
+            return false;
+        }
+    }
+
+    // Check if Roo-Code is ready
+    isRooCodeReady(): boolean {
+        return this.rooCodeAPI?.isReady() || false;
     }
 
     private resolveFilePath(filePath: string): string {
